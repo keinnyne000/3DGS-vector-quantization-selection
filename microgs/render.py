@@ -32,16 +32,16 @@ def project(mu, sigma, cam_rot, cam_trans, focal_x, focal_y, cx, cy):
     tx, ty, tz = t;
 
     # pinhole projection
-    mean2d = torch.stack([focal_x * tx / tz * cx, focal_y * ty / tz * cy])
+    mean2d = torch.stack([focal_x * tx / tz + cx, focal_y * ty / tz + cy])
 
     # ???
     J = torch.stack([                              # d(pixel)/d(camera point), evaluated at t
-        torch.stack([fx / tz, torch.zeros(()), -fx * tx / tz**2]),
-        torch.stack([torch.zeros(()), fy / tz, -fy * ty / tz**2]),
+        torch.stack([focal_x / tz, torch.zeros(()), -focal_x * tx / tz**2]),
+        torch.stack([torch.zeros(()), focal_y / tz, -focal_y * ty / tz**2]),
     ])
 
     J_rotated = J @ cam_rot
-    cov2d = J_rotated @ Sigma @ J_rotated.T
+    cov2d = J_rotated @ sigma @ J_rotated.T
 
     # add 0.3 px^2 in each dir so the blob is never smaller than a pixel
     cov2d = cov2d + 0.3 * torch.eye(2) 
@@ -50,9 +50,9 @@ def project(mu, sigma, cam_rot, cam_trans, focal_x, focal_y, cx, cy):
     return mean2d, cov2d, tz
 
 
-def render(params, cam, H, w_img, bg):
+def render(params, cam, H, W_img, bg):
     Sigma = covariance(params["log_scale"], params["quat"])
-    mean2d, cov2, tz = project(params["mu"], Sigma, **cam)
+    mean2d, cov2d, depth = project(params["mu"], Sigma, **cam)
 
     #???
     conic = torch.linalg.inv(cov2d)
@@ -80,15 +80,37 @@ def render(params, cam, H, w_img, bg):
 
 # ----------------------------------------------------------------------
 
-# Claude-Generated: Makes a dict with camera vars
 def default_camera(H, W_img):
-    return dict(W=torch.eye(3), tvec=torch.tensor([0., 0., 4.]),   # camera 4 units back
-                fx=60.0, fy=60.0, cx=W_img/2, cy=H/2)
+    return dict(cam_rot=torch.eye(3), cam_trans=torch.tensor([0., 0., 4.]),   # camera 4 units back
+                focal_x=60.0, focal_y=60.0, cx=W_img/2, cy=H/2)
 
 
 if __name__ == "__main__":
     H, W_img = 64, 64
     cam = default_camera(H, W_img)
     bg=torch.zeros(3)
+
+    target_p = make_params(mu=[0.4, -0.2, 0.0], log_scale=[-0.7, -2.0, -2.0],
+                           quat=[0.92, 0.0, 0.0, 0.38], opacity_logit=2.0,
+                           rgb_logit=[2.0, 0.3, -2.0])
+
+    # no_grad turns off recording for those methods (not used in autograd)
+    with torch.no_grad():
+        target = render(target_p, cam, H, W_img, bg)
+
+
+    # OUTPUT -------------------------------------------------------------------------
+    import matplotlib
+    matplotlib.use("Agg")          # set the backend before importing pyplot
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(1, 1, figsize=(9, 3.2))
+    ax.imshow(target.detach().cpu().clamp(0, 1).numpy())
+    ax.set_title("Render")
+    ax.axis("off")
+    plt.tight_layout()
+    plt.savefig("render.png", dpi=120)
+    plt.close(fig)
+    print("render.png")
+
 
 
