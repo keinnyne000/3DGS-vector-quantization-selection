@@ -40,6 +40,10 @@ if __name__ == "__main__":
             print(f"iter {it:3d}  loss {loss.item():.2e}")
 
     final_img = render.render(p, cam, H, W_img, bg).detach()
+    
+    mse = ((final_img - target) ** 2).mean()
+    psnr = -10 * torch.log10(mse)
+    print(f"Uncompressed baseline PSNR: {psnr.item():.2f} dB")
 
     utils.export_results(initial_img, final_img, target)
 
